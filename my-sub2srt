@@ -1,0 +1,31 @@
+#!/bin/bash
+
+while (( "$#" )); do
+
+  if [ -f "${1%.*}.avi" ]; then
+    file_vid="${1%.*}.avi"
+  elif [ -f "${1%.*}.mkv" ]; then
+    file_vid="${1%.*}.mkv"
+  else
+    echo "{$1}: Neither an AVI nor a MKV file can be found - I don't know the FPS"
+    exit 1
+  fi
+
+  fps=`getfps "$file_vid"`
+
+  if [ $? -ne 0 ]; then
+    echo "{$1}: Can't extract the frame rate from the video file!"
+    exit 1
+  fi
+
+  echo "--- $1"
+  sub2srt -f=$fps --force "$1"
+
+  if [ $? -ne 0 ]; then
+    echo "{$1}: Error during conversion"
+    exit 1
+  fi
+
+  shift
+done
+

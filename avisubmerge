@@ -1,0 +1,40 @@
+#!/bin/bash
+
+CHARSET="WINDOWS-1251"
+SUBLANG="bul"
+
+while (( "$#" )); do
+
+  vidfile=$1
+  subfile=${vidfile%.*}.srt
+  outfile=${vidfile%.*}.mkv
+
+  if [ ! -f "$vidfile" ]; then
+    echo "$vidfile does not exist"
+    exit 1
+  fi
+
+  if [ ! -f "$subfile" ]; then
+    echo "Skip $vidfile - no subtitles found"
+    echo
+    shift
+    continue
+  fi
+
+  mkvmerge -o "$outfile" "$vidfile" "--sub-charset" "0:$CHARSET" "--language" "0:$SUBLANG" "--default-track" "0:yes" "$subfile"
+  res=$?
+
+  chmod --reference="$vidfile" "$outfile"
+  if [ $(whoami) = "root" ]; then
+    chown --reference="$vidfile" "$outfile"
+  fi
+
+  if [ $res -ne 0 ]; then
+    echo "$vidfile: Error merging subtitles"
+    exit 1
+  fi
+
+  echo
+  shift
+done
+

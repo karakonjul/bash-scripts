@@ -1,0 +1,3 @@
+#!/bin/bash
+mkv_file="${1%.*}.mkv"
+ffmpeg -i "$1" -vcodec copy -acodec copy "$mkv_file"

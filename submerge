@@ -1,0 +1,163 @@
+#!/bin/bash
+
+#  submerge - Merge MKV and SRT files together
+#  (c) 2011 Rosen Ivanov <rosen@nazdrave.net>
+#
+#  2011-02-09 - original version 0.0.1
+#  2011-02-10 - 0.0.2 - fix displaying help for each non-mkv file from the arguments
+#  2011-02-10 - 0.0.3 - do a chown only if root
+#  2011-02-10 - 0.0.4 - fix charset and lang to actually work
+#  2011-02-10 - 0.0.5 - improve documentation
+#  2011-02-11 - 0.0.6 - capitalize global variables
+#  2011-02-16 - 0.0.7 - write temp file in the video file directory, not in the current one
+#  2012-03-16 - 0.1.0 - reverse the overwrite logic: do not overwrite unless told otherwise
+
+TMPFILE=".submerge.tmp"
+VERSION="0.1.0"
+
+# Options
+RECURSIVE=1
+NODELETE=0
+JUST_DUMP=1
+
+# Edit these to suit your needs:
+CHARSET="WINDOWS-1251"
+SUBLANG="bul"
+
+
+print_help() {
+    cat <<EOD
+submerge v$VERSION by Rosen Ivanov - Merge MKV and SRT files together
+
+Usage: submerge [OPTION]... PATH...
+
+Options:
+  -r            Search directories recursively. Ignored if only regular files
+                are specified.
+  -c CHARSET    Set the character set of the input SRT file,
+                default is $CHARSET.
+  -l LANG       Set the language of the subtitle track, default is $SUBLANG. See
+                "mkvmerge --list-languages" for the list of supported languages.
+  -o            Overwrite existing MKV file and delete the merged SRT file. If
+                this is not specified, the new MKV file will be saved with
+                "[merged]" appended to the filename.
+  -d            Just dump the video filenames instead of merging.
+
+submerge will only work on matching pairs of MKV and SRT files. The files in the
+pair need to have the same filenames (short of the extension, obviously).
+A list of paths can be specified - each PATH can be either a regular file or a
+directory. Directories will only be processed if the -r option is enabled.
+
+If the charset of the SRT file is different than the default and you haven't
+specified it, this will result in corrupted and unreadable subtitles.
+
+Examples:
+
+Process a single MKV file:
+  submerge filename.mkv
+
+Process all MKV files in the current directory:
+  submerge *
+
+Process the current directory recursively (both variants do the same):
+  submerge -r .
+  submerge -r *
+
+EOD
+}
+
+process_dir() {
+    if [ $RECURSIVE -eq 1 ]; then return 0; fi
+
+    local dir="${1%/}"
+    for file in "$dir"/*; do
+        process_file "$file"
+    done
+}
+
+process_file() {
+    if [ -d "$1" ]; then
+        process_dir "$1"
+    fi
+
+    if [ ! -f "$1" ]; then return 1; fi
+    if [[ ! $1 =~ mkv$ ]]; then return 1; fi
+
+    local subfile="${1%.*}.srt"
+    if [ -f "$subfile" ]; then
+        merge_sub "$1" "$subfile"
+    fi
+}
+
+merge_sub() {
+    #echo merging $2 into $1
+
+    if [ $JUST_DUMP -eq 0 ]; then
+        echo $1
+        return 0
+    fi
+
+    local vidfile=$1
+    local subfile=$2
+    local outfile=${vidfile%.*}.mkv
+    local tmp=$(dirname "$vidfile")/"$outfile$TMPFILE"
+
+    if [ -f "$tmp" ]; then
+        # delete the temp file if it exists
+        rm -f "$tmp"
+    fi
+
+    mkvmerge -o "$tmp" "$vidfile" "--sub-charset" "0:$CHARSET" "--language" "0:$SUBLANG" "--default-track" "0:yes" "$subfile"
+
+    local merge_res=$?
+
+    # restore file attributes
+    chmod --reference="$vidfile" "$tmp"
+    if [ $(whoami) = "root" ]; then
+        chown --reference="$vidfile" "$tmp"
+    fi
+
+    if [ $merge_res -eq 0 ]; then
+        # clean up and replace the original file with the temp one
+        if [ $NODELETE -eq 0 ]; then
+            outfile="${vidfile%.*} [merged].mkv"
+            mv -f "$tmp" "$outfile"
+        else
+            rm -f "$vidfile" "$subfile"
+            mv "$tmp" "$outfile"
+        fi
+    else
+        # mkvmerge exited with error - stop everything
+        echo "mkvmerge exited with status $merge_res - check out the temp file ($tmp) and if it's OK, manually rename it to the original"
+        exit $merge_res
+    fi
+    echo
+}
+
+# parse options
+while getopts rodc:l: o
+do
+  case "$o" in
+    r) RECURSIVE=0 ;;
+    c) CHARSET="$OPTARG" ;;
+    l) SUBLANG="$OPTARG" ;;
+    o) NODELETE=1 ;;
+    d) JUST_DUMP=0 ;;
+    [?]) print_help ;;
+  esac
+done
+
+let shft=$OPTIND-1
+
+shift $shft
+
+if [ $# -eq 0 ]; then print_help; fi
+
+while (( "$#" )); do
+    if [ -d "$1" ]; then
+        process_dir "$1"
+    elif [ -f "$1" ]; then
+        process_file "$1"
+    fi
+    shift
+done
